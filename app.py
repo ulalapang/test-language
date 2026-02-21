@@ -44,7 +44,7 @@ selected_langs = st.sidebar.multiselect(
     key="sidebar_langs"
 )
 
-min_langs = st.sidebar.slider("최소 지원 언어 수", 0, int(df["language_count"].max() or 0), 0)
+min_langs = st.sidebar.slider("지원 언어 수 (정확히 이 개수만)", 0, int(df["language_count"].max() or 0), 0)
 
 top_n = st.sidebar.slider("언어 TOP N", 5, 30, 15)
 
@@ -67,7 +67,7 @@ else:
     df_f = df.copy()
     df_long_f = df_long.copy()
 
-df_f = df_f[df_f["language_count"] >= min_langs].copy()
+df_f = df_f[df_f["language_count"] >= min_langs].copy() if min_langs == 0 else df_f[df_f["language_count"] == min_langs].copy()
 df_long_f = df_long_f[df_long_f["appid"].isin(df_f["appid"])].copy()
 
 # -----------------------
@@ -145,44 +145,96 @@ with tab1:
     
     with col_filter:
         st.markdown("#### 빠른 필터")
-        lang_pick_summary = st.selectbox(
-            "언어 선택",
-            options=all_langs,
-            index=(all_langs.index("English") if "English" in all_langs else 0),
-            key="summary_lang_filter"
-        )
         
-        # 선택한 언어로 필터 업데이트
-        if lang_pick_summary:
-            appids_for_lang = df_long_f[df_long_f["language"] == lang_pick_summary]["appid"].unique().tolist()
-            df_lang_games_summary = df_f[df_f["appid"].isin(appids_for_lang)].copy()
+        # 지원 언어 수가 특정 개수로 필터링되어 있으면 선택 불가
+        if min_langs > 0:
+            st.info(f"왼쪽 사이드바에서 '{min_langs}개 언어' 필터가 설정되어 있어 빠른 필터를 사용할 수 없습니다.")
+            lang_pick_summary = None
+        else:
+            lang_options = ["-"] + all_langs
+            lang_pick_summary = st.selectbox(
+                "언어 선택",
+                options=lang_options,
+                index=0,
+                key="summary_lang_filter"
+            )
             
-            st.metric(f"{lang_pick_summary} 지원 게임 수", f"{len(df_lang_games_summary)} 개")
-            
-            df_lang_games_summary = df_lang_games_summary.sort_values(["language_count", "name"], ascending=[False, True])
-            cols = [c for c in ["name", "language_count", "languages", "appid"] if c in df_lang_games_summary.columns]
-            st.dataframe(df_lang_games_summary[cols].head(10), use_container_width=True, height=300)
+            # 선택한 언어로 필터 업데이트
+            if lang_pick_summary and lang_pick_summary != "-":
+                appids_for_lang = df_long_f[df_long_f["language"] == lang_pick_summary]["appid"].unique().tolist()
+                df_lang_games_summary = df_f[df_f["appid"].isin(appids_for_lang)].copy()
+                
+                st.metric(f"{lang_pick_summary} 지원 게임 수", f"{len(df_lang_games_summary)} 개")
+                
+                df_lang_games_summary = df_lang_games_summary.sort_values(["language_count", "name"], ascending=[False, True])
+                cols = [c for c in ["name", "language_count", "languages", "appid"] if c in df_lang_games_summary.columns]
+                st.dataframe(df_lang_games_summary[cols].head(10), use_container_width=True, height=300)
 
     with col_chart:
-        # 정수형 축으로 차트 생성
-        chart = (
-            alt.Chart(top_f.head(top_n))
-            .mark_bar()
-            .encode(
-                y=alt.Y("language:N", sort="-x", title=None),
-                x=alt.X("game_count:Q", title="지원 게임 수", axis=alt.Axis(format='d')),
-                tooltip=[
-                    alt.Tooltip("language:N", title="언어"), 
-                    alt.Tooltip("game_count:Q", title="게임 수", format='d')
-                ]
+        # 빠른 필터가 선택되지 않았으면 차트 표시 안 함
+        if min_langs == 0 and lang_pick_summary and lang_pick_summary != "-":
+            # 선택한 언어로 필터링된 데이터
+            appids_for_lang = df_long_f[df_long_f["language"] == lang_pick_summary]["appid"].unique().tolist()
+            df_filtered_for_chart = df_long[df_long["appid"].isin(appids_for_lang)]
+            
+            top_f_filtered = (
+                df_filtered_for_chart.groupby("language")["appid"]
+                .nunique()
+                .sort_values(ascending=False)
+                .reset_index(name="game_count")
             )
-            .properties(height=520)
-        )
-        st.altair_chart(chart, use_container_width=True)
+            
+            # 정수형 축으로 차트 생성
+            chart = (
+                alt.Chart(top_f_filtered.head(top_n))
+                .mark_bar()
+                .encode(
+                    y=alt.Y("language:N", sort="-x", title=None),
+                    x=alt.X("game_count:Q", title="지원 게임 수", axis=alt.Axis(format='d')),
+                    tooltip=[
+                        alt.Tooltip("language:N", title="언어"), 
+                        alt.Tooltip("game_count:Q", title="게임 수", format='d')
+                    ]
+                )
+                .properties(height=520)
+            )
+            st.altair_chart(chart, use_container_width=True)
+        elif min_langs > 0:
+            # 최소 지원 언어 수가 설정되어 있으면 기본 차트 표시
+            chart = (
+                alt.Chart(top_f.head(top_n))
+                .mark_bar()
+                .encode(
+                    y=alt.Y("language:N", sort="-x", title=None),
+                    x=alt.X("game_count:Q", title="지원 게임 수", axis=alt.Axis(format='d')),
+                    tooltip=[
+                        alt.Tooltip("language:N", title="언어"), 
+                        alt.Tooltip("game_count:Q", title="게임 수", format='d')
+                    ]
+                )
+                .properties(height=520)
+            )
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.info("왼쪽에서 언어를 선택하면 그래프가 표시됩니다.")
 
     if show_tables:
         st.caption("언어별 지원 게임 수(필터 적용)")
-        st.dataframe(top_f.head(top_n), use_container_width=True)
+        
+        # 게임명 추가
+        top_f_with_games = top_f.copy()
+        game_names_list = []
+        
+        for _, row in top_f_with_games.iterrows():
+            lang = row['language']
+            # 해당 언어를 지원하는 게임들
+            game_appids = df_long_f[df_long_f["language"] == lang]["appid"].unique()
+            games = df_f[df_f["appid"].isin(game_appids)]["name"].tolist()
+            game_names_list.append(", ".join(games[:5]) + ("..." if len(games) > 5 else ""))
+        
+        top_f_with_games["게임명칭"] = game_names_list
+        
+        st.dataframe(top_f_with_games.head(top_n), use_container_width=True)
 
 # -----------------------
 # 2) 언어 TOP 탭
